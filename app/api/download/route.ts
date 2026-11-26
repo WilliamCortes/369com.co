@@ -31,8 +31,9 @@ export async function GET(req: NextRequest) {
   const sessionId = claims.sessionId;
   const tierId = claims.tierId || 'blueprint';
 
-  // Retrieve order details if available
+  // Retrieve order details if available (fall back to signed claims across serverless instances)
   const order = sessionId ? orderStore.getOrder(sessionId) : undefined;
+  const numerologyData = order?.numerologyData || claims.numerologyData;
   const clientName =
     order?.customerName || claims.name || claims.customerName || 'Cosmic Seeker';
   const intention =
@@ -44,12 +45,12 @@ export async function GET(req: NextRequest) {
       clientName,
       intention,
       tierId,
-      birthDate: order?.numerologyData?.birthDate,
-      lifePathNumber: order?.numerologyData?.lifePath,
-      lifePathTitle: order?.numerologyData?.lifePathTitle,
-      teslaTriadNode: order?.numerologyData?.teslaNode,
-      resonanceScore: order?.numerologyData?.resonance369Score,
-      dominantElement: order?.numerologyData?.dominantElement
+      birthDate: numerologyData?.birthDate,
+      lifePathNumber: numerologyData?.lifePath,
+      lifePathTitle: numerologyData?.lifePathTitle,
+      teslaTriadNode: numerologyData?.teslaNode,
+      resonanceScore: numerologyData?.resonance369Score,
+      dominantElement: numerologyData?.dominantElement
     });
 
     // Deliver master suite zip if tier is master and not explicitly requesting single pdf

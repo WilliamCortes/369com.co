@@ -16,10 +16,10 @@ import {
   Volume2,
   Package
 } from 'lucide-react';
-import { PRODUCT_CATALOG } from '@/lib/stripe';
+import { PRODUCT_CATALOG } from '@/lib/catalog';
 
 interface OrderStatusResponse {
-  status: 'pending' | 'fulfilled' | 'refunded';
+  status: 'pending' | 'fulfilled' | 'refunded' | 'failed' | 'expired';
   orderId?: string;
   tierId?: string;
   customerEmail?: string;
@@ -88,6 +88,13 @@ function SuccessContent() {
               setLoading(false);
               setError('Payment is being confirmed. Please refresh in a few moments.');
             }
+          } else {
+            setLoading(false);
+            setError(
+              data.status === 'refunded'
+                ? 'This order has been refunded.'
+                : 'Payment session expired or could not be completed.'
+            );
           }
         }
       } catch (err: any) {

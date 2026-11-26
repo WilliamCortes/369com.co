@@ -19,6 +19,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@polar-sh/sdk": "^1.3.3",
     "clsx": "^2.1.1",
     "lucide-react": "^1.72.0",
     "next": "14.2.25",

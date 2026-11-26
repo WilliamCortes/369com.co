@@ -48,6 +48,14 @@ export class InMemoryOrderStore implements IOrderStore {
     return this.ordersById.get(orderId);
   }
 
+  markOrderRefunded(orderIdOrSessionId: string): boolean {
+    const order =
+      this.ordersById.get(orderIdOrSessionId) || this.ordersBySession.get(orderIdOrSessionId);
+    if (!order) return false;
+    order.status = 'refunded';
+    return true;
+  }
+
   clear(): void {
     this.ordersBySession.clear();
     this.ordersById.clear();
@@ -72,6 +80,7 @@ export function getDownloadSigningSecret(env: Record<string, string | undefined>
   const secret = (
     env.DOWNLOAD_SIGNING_SECRET ||
     env.FULFILLMENT_JWT_SECRET ||
+    env.POLAR_WEBHOOK_SECRET ||
     env.STRIPE_WEBHOOK_SECRET ||
     ''
   ).trim();

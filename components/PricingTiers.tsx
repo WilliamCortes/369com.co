@@ -11,7 +11,7 @@ import {
   Mail,
   Zap
 } from 'lucide-react';
-import { PRODUCT_CATALOG } from '@/lib/stripe';
+import { PRODUCT_CATALOG } from '@/lib/catalog';
 import { NumerologyResult } from '@/lib/numerology';
 
 export interface PricingTiersProps {

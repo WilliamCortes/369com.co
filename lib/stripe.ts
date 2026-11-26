@@ -1,101 +1,31 @@
 import Stripe from 'stripe';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { orderStore, generateDownloadToken } from './order-store';
+import {
+  PRODUCT_CATALOG,
+  EMAIL_REGEX,
+  isValidTier,
+  isValidEmail,
+  type PricingTier,
+  type CheckoutRequest,
+  type CheckoutResponse
+} from './catalog';
+import { hasValidPolarToken, createPolarCheckoutSession } from './polar';
 
-export interface PricingTier {
-  id: string;
-  name: string;
-  price: number;
-  cents: number;
-  currency: 'usd';
-  features: string[];
-}
-
-export const PRODUCT_CATALOG: Record<string, PricingTier> = {
-  starter: {
-    id: 'starter',
-    name: '369 Manifestation Starter Blueprint',
-    price: 4.99,
-    cents: process.env.PRICE_STARTER_CENTS ? parseInt(process.env.PRICE_STARTER_CENTS, 10) : 499,
-    currency: 'usd',
-    features: [
-      '33-Day Nikola Tesla 369 Ritual Guide',
-      'Printable Morning/Noon/Night Affirmation Worksheets',
-      'Basic Pythagorean Numerology Summary'
-    ]
-  },
-  blueprint: {
-    id: 'blueprint',
-    name: 'Personalized Tesla 369 Manifestation Blueprint',
-    price: 7.99,
-    cents: 799,
-    currency: 'usd',
-    features: [
-      'Personalized Dynamic 15+ Page Dossier',
-      'Life Path & Tesla Vortex Node Breakdown',
-      '33-Day Custom Scripting Matrix',
-      'High-Definition 369Hz Harmonic Audio (MP3)'
-    ]
-  },
-  pro: {
-    id: 'pro',
-    name: '369 Frequency Suite & Pro Blueprint',
-    price: 9.99,
-    cents: process.env.PRICE_PRO_CENTS ? parseInt(process.env.PRICE_PRO_CENTS, 10) : 999,
-    currency: 'usd',
-    features: [
-      'Complete Personalized Blueprint',
-      'High-Definition 369Hz Solfeggio Audio (Lossless WAV/MP3)',
-      'Interactive Digital Manifestation Journal Access',
-      'Printable Daily Sacred Geometry Worksheets'
-    ]
-  },
-  master: {
-    id: 'master',
-    name: '369 Master Sanctuary Kit',
-    price: 19.99,
-    cents: process.env.PRICE_MASTER_CENTS ? parseInt(process.env.PRICE_MASTER_CENTS, 10) : 1999,
-    currency: 'usd',
-    features: [
-      'Lifetime Master Access',
-      'Complete 9-Frequency Solfeggio Suite (174Hz to 963Hz)',
-      'Personalized AI Affirmation Matrix',
-      '45-Day Sacred Geometry Tactile Workbook (PDF)',
-      'The Nikola Tesla Vortex Code Deconstructed Guide'
-    ]
-  }
+export {
+  PRODUCT_CATALOG,
+  EMAIL_REGEX,
+  isValidTier,
+  isValidEmail,
+  type PricingTier,
+  type CheckoutRequest,
+  type CheckoutResponse
 };
-
-export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-export function isValidTier(tierId: unknown): tierId is keyof typeof PRODUCT_CATALOG {
-  return typeof tierId === 'string' && Object.prototype.hasOwnProperty.call(PRODUCT_CATALOG, tierId);
-}
-
-export function isValidEmail(email: unknown): boolean {
-  if (typeof email !== 'string') return false;
-  const trimmed = email.trim();
-  return Boolean(trimmed) && EMAIL_REGEX.test(trimmed);
-}
-
-export interface CheckoutRequest {
-  tierId: string;
-  customerEmail?: string;
-  customerName?: string;
-  intention?: string;
-  numerologyData?: any;
-}
-
-export interface CheckoutResponse {
-  success: boolean;
-  sessionId: string;
-  url: string;
-  mock?: boolean;
-}
 
 export interface GatewayGuardResult {
   allowed: boolean;
   mode: 'live' | 'mock' | 'blocked';
+  provider?: 'polar' | 'stripe' | 'mock';
   status: 200 | 503;
   error?: string;
 }
@@ -126,17 +56,19 @@ export function evaluateGatewayGuard(env: Record<string, string | undefined> = p
   const isProd = env.NODE_ENV === 'production';
   const mockPayments = env.MOCK_PAYMENTS === 'true';
   const allowMockInProd = env.ALLOW_MOCK_PAYMENTS_IN_PRODUCTION === 'true';
+  const requestedProvider = env.PAYMENT_PROVIDER?.trim().toLowerCase();
   const stripeSecretKey = env.STRIPE_SECRET_KEY?.trim();
   const hasValidStripeKey = Boolean(
     stripeSecretKey &&
     !stripeSecretKey.includes('placeholder') &&
     (stripeSecretKey.startsWith('sk_live_') || stripeSecretKey.startsWith('sk_test_'))
   );
+  const hasValidPolar = hasValidPolarToken(env);
 
   if (isProd) {
     if (mockPayments) {
       if (allowMockInProd) {
-        return { allowed: true, mode: 'mock', status: 200 };
+        return { allowed: true, mode: 'mock', provider: 'mock', status: 200 };
       }
       return {
         allowed: false,
@@ -144,6 +76,34 @@ export function evaluateGatewayGuard(env: Record<string, string | undefined> = p
         status: 503,
         error: 'Payment gateway configuration required: MOCK_PAYMENTS is disabled in production'
       };
+    }
+
+    if (requestedProvider === 'polar') {
+      if (!hasValidPolar) {
+        return {
+          allowed: false,
+          mode: 'blocked',
+          status: 503,
+          error: 'Payment gateway configuration required: POLAR_ACCESS_TOKEN missing in production environment'
+        };
+      }
+      return { allowed: true, mode: 'live', provider: 'polar', status: 200 };
+    }
+
+    if (requestedProvider === 'stripe') {
+      if (!hasValidStripeKey) {
+        return {
+          allowed: false,
+          mode: 'blocked',
+          status: 503,
+          error: 'Payment gateway configuration required: STRIPE_SECRET_KEY missing in production environment'
+        };
+      }
+      return { allowed: true, mode: 'live', provider: 'stripe', status: 200 };
+    }
+
+    if (hasValidPolar) {
+      return { allowed: true, mode: 'live', provider: 'polar', status: 200 };
     }
 
     if (!hasValidStripeKey) {
@@ -155,15 +115,27 @@ export function evaluateGatewayGuard(env: Record<string, string | undefined> = p
       };
     }
 
-    return { allowed: true, mode: 'live', status: 200 };
+    return { allowed: true, mode: 'live', provider: 'stripe', status: 200 };
   }
 
   // Non-production (development, test, CI)
-  if (mockPayments || !hasValidStripeKey) {
-    return { allowed: true, mode: 'mock', status: 200 };
+  if (mockPayments) {
+    return { allowed: true, mode: 'mock', provider: 'mock', status: 200 };
   }
 
-  return { allowed: true, mode: 'live', status: 200 };
+  if (requestedProvider === 'polar' && hasValidPolar) {
+    return { allowed: true, mode: 'live', provider: 'polar', status: 200 };
+  }
+
+  if (hasValidStripeKey && requestedProvider !== 'polar') {
+    return { allowed: true, mode: 'live', provider: 'stripe', status: 200 };
+  }
+
+  if (hasValidPolar && requestedProvider !== 'stripe') {
+    return { allowed: true, mode: 'live', provider: 'polar', status: 200 };
+  }
+
+  return { allowed: true, mode: 'mock', provider: 'mock', status: 200 };
 }
 
 export function isMockPaymentsEnabled(): boolean {
@@ -247,6 +219,10 @@ export async function createCheckoutSession(
 
   if (guard.mode === 'mock') {
     return createMockCheckoutSession(req, origin);
+  }
+
+  if (guard.provider === 'polar') {
+    return createPolarCheckoutSession(req, origin);
   }
 
   const stripe = getStripeClient();

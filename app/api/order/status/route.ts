@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { orderStore, generateDownloadToken } from '@/lib/order-store';
+import { syncPolarCheckoutStatus } from '@/lib/polar';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,7 +16,19 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const order = orderStore.getOrder(sessionId);
+  let order = orderStore.getOrder(sessionId);
+
+  if (!order && !sessionId.startsWith('mock_cs_')) {
+    const polarState = await syncPolarCheckoutStatus(sessionId);
+    if (polarState.order) {
+      order = polarState.order;
+    } else if (polarState.status === 'failed' || polarState.status === 'expired') {
+      return NextResponse.json(
+        { status: polarState.status, session_id: sessionId },
+        { status: 200 }
+      );
+    }
+  }
 
   if (order) {
     return NextResponse.json(
@@ -26,7 +39,10 @@ export async function GET(req: NextRequest) {
         customerEmail: order.customerEmail,
         customerName: order.customerName,
         intention: order.intention,
-        downloadUrl: order.downloadToken ? `/api/download?token=${order.downloadToken}` : null,
+        downloadUrl:
+          order.status === 'fulfilled' && order.downloadToken
+            ? `/api/download?token=${order.downloadToken}`
+            : null,
         createdAt: order.createdAt
       },
       { status: 200 }
