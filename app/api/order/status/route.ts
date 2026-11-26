@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { orderStore, generateDownloadToken } from '@/lib/order-store';
+import { orderStore, generateDownloadToken, verifyDownloadToken } from '@/lib/order-store';
 import { syncPolarCheckoutStatus } from '@/lib/polar';
 
 export const dynamic = 'force-dynamic';
@@ -7,7 +7,41 @@ export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
+  const directToken = searchParams.get('token');
   const sessionId = searchParams.get('session_id') || searchParams.get('sessionId');
+
+  if (directToken) {
+    const verification = verifyDownloadToken(directToken);
+    if (!verification.valid || !verification.claims) {
+      return NextResponse.json(
+        { error: verification.error || 'Invalid or expired download token' },
+        { status: 401 }
+      );
+    }
+
+    const claims = verification.claims;
+    const storedOrder = claims.sessionId ? orderStore.getOrder(claims.sessionId) : undefined;
+    if (storedOrder?.status === 'refunded') {
+      return NextResponse.json(
+        { status: 'refunded', orderId: storedOrder.orderId, downloadUrl: null },
+        { status: 200 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        status: 'fulfilled',
+        orderId: storedOrder?.orderId || claims.sessionId || 'breb_verified',
+        tierId: storedOrder?.tierId || claims.tierId || 'blueprint',
+        customerEmail: storedOrder?.customerEmail || claims.email,
+        customerName: storedOrder?.customerName || claims.name || 'Cosmic Seeker',
+        intention: storedOrder?.intention || claims.intention,
+        downloadUrl: `/api/download?token=${encodeURIComponent(directToken)}`,
+        createdAt: storedOrder?.createdAt || new Date().toISOString()
+      },
+      { status: 200 }
+    );
+  }
 
   if (!sessionId) {
     return NextResponse.json(

@@ -130,3 +130,27 @@ export function extractNumerologyMetadata(
 
   return Object.values(snapshot).some((v) => v !== undefined) ? snapshot : undefined;
 }
+
+export const DEFAULT_BREB_KEY = '@3103298346';
+export const DEFAULT_USD_TO_COP = 4200;
+
+export function getPublicBrebKey(): string {
+  return process.env.NEXT_PUBLIC_BREB_KEY?.trim() || DEFAULT_BREB_KEY;
+}
+
+export function getUsdToCopRate(): number {
+  const raw = process.env.NEXT_PUBLIC_BREB_USD_TO_COP || process.env.BRE_B_USD_TO_COP;
+  const parsed = raw ? parseFloat(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_USD_TO_COP;
+}
+
+export function getCopAmountForTier(tierId: string, rate: number = getUsdToCopRate()): number {
+  const tier = PRODUCT_CATALOG[tierId] || PRODUCT_CATALOG.blueprint;
+  // Round to nearest 100 COP for clean instant bank transfers
+  return Math.round((tier.price * rate) / 100) * 100;
+}
+
+export function formatCop(amountCop: number): string {
+  return `$${amountCop.toLocaleString('es-CO')} COP`;
+}
+

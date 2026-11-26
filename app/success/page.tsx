@@ -31,6 +31,7 @@ interface OrderStatusResponse {
 
 function SuccessContent() {
   const searchParams = useSearchParams();
+  const directToken = searchParams.get('token') || '';
   const sessionId = searchParams.get('session_id') || searchParams.get('sessionId') || '';
   const isMock = searchParams.get('mock') === 'true';
 
@@ -40,7 +41,7 @@ function SuccessContent() {
   const [audioPlaying, setAudioPlaying] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId && !directToken) {
       setLoading(false);
       setError('No session ID provided. Please access via your checkout confirmation link.');
       return;
@@ -52,7 +53,10 @@ function SuccessContent() {
 
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`/api/order/status?session_id=${encodeURIComponent(sessionId)}`);
+        const query = directToken
+          ? `token=${encodeURIComponent(directToken)}`
+          : `session_id=${encodeURIComponent(sessionId)}`;
+        const res = await fetch(`/api/order/status?${query}`);
         if (!res.ok) {
           throw new Error('Failed to retrieve order status');
         }
@@ -69,7 +73,7 @@ function SuccessContent() {
                 localStorage.setItem(
                   '369_vip_order',
                   JSON.stringify({
-                    sessionId,
+                    sessionId: sessionId || data.orderId || 'breb_verified',
                     tierId: data.tierId,
                     orderId: data.orderId,
                     downloadUrl: data.downloadUrl,
@@ -110,7 +114,7 @@ function SuccessContent() {
     return () => {
       isMounted = false;
     };
-  }, [sessionId]);
+  }, [sessionId, directToken]);
 
   const tierId = order?.tierId || (sessionId.includes('master') ? 'master' : 'blueprint');
   const tier = PRODUCT_CATALOG[tierId] || PRODUCT_CATALOG.blueprint;
@@ -297,7 +301,10 @@ function SuccessContent() {
           <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 text-xs text-zinc-400">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-emerald-400" />
-              <span>Lifetime DRM License Authenticated to {sessionId.slice(0, 16)}</span>
+              <span>
+                Lifetime DRM License Authenticated to{' '}
+                {(sessionId || order.orderId || 'VIP-369').slice(0, 16)}
+              </span>
             </div>
 
             <div className="flex items-center gap-3">
